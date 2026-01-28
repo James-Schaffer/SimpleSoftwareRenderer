@@ -24,6 +24,6 @@ void initWindow(Window window) {
 	window->window = SDL_CreateWindow(
 		"TEST_HELLO_WORLD",
 		window->width, window->height,
-		SDL_WINDOW_RESIZABLE
+		SDL_WINDOW_FULLSCREEN
 	);
 }

@@ -5,26 +5,31 @@
 
 #define SDL_MAIN_HANDLED
 
+// WRITEN BY JAMES SCHAFFER 2026
+//
+// SIMPLE CUBE RENDERER, C & SDL
+//
+// Note world axis :
+//
+// x -left/right+
+// y -front/back+
+// z -up/down+
+
+// ========== DEFINITIONS ==========
+
 const double PI = 3.1415926535897932384;
 #define DEG2RAD(x) ((x) * (PI / 180.0))
 
-#define SDL_WINDOW_WIDTH	740U
-#define SDL_WINDOW_HEIGHT	740U
+#define SDL_WINDOW_WIDTH	1920U
+#define SDL_WINDOW_HEIGHT	1080U
 
-#define CAM_FOV				(PI/2)
+#define CAM_FOV				(PI/2) // 90 degrees
 #define CAM_CLIP_MIN		0.5
-//#define CAM_CLIP_MAX		500 // not relevent for this kind of renderer
 
-bool gameRunning = true;
+#define MAX_VERTEX			10000U
+#define MAX_FACES			10000U
 
-bool spaceDown = false;
-bool xDown = false;
-bool yDown = false;
-bool zDown = false;
-bool sDown = false;
-bool dDown = false;
-
-bool spinToggle = false;
+// ========== STRUCTS ==========
 
 typedef struct v3 {
 	double x;
@@ -48,8 +53,9 @@ typedef struct  {
 } Transform;
 typedef struct  {
 	v3 position;
-	v3 normal;
-	v3 up;
+	v3 rotation;
+	v3 defNormal;
+	v3 defUp;
 } CamState;
 typedef struct {
 	v3 position;
@@ -59,6 +65,38 @@ typedef struct {
 	v3 rightV;
 	double fov_scale;
 } CamProjectionInfo;
+
+// ========== OTHER VARS ==========
+
+bool gameRunning = true;
+
+// ========== INPUT BOOLS ==========
+// Rotation
+bool spaceDown = false;
+bool spinToggle = false;
+
+bool xDown = false;
+bool yDown = false;
+bool zDown = false;
+
+// Scale
+bool jDown = false;
+bool kDown = false;
+
+// Cam move
+bool wDown = false;
+bool aDown = false;
+bool sDown = false;
+bool dDown = false;
+
+bool eDown = false;
+bool qDown = false;
+
+
+
+// ######################OLD TO REMOVE WHEN CHANGED###############################################
+
+// ========== OLD MESH DATA ==========
 
 const int CUBE_POINTS = 8;
 const v3 CUBE_POINT_VECTORS[] = {
@@ -89,17 +127,31 @@ const v2i CUBE_EDGE_INDEXS[] = {
 	{7,6},
 	{6,4}
 };
+// 6 faces, each with 4 vertices
+const int CUBE_FACES[6][4] = {
+	{2, 3, 6, 7}, // front
+	{0, 1, 4, 5}, // back
+	{1, 3, 5, 7}, // top
+	{0, 2, 4, 6}, // bottom
+	{0, 1, 2, 3}, // right
+	{4, 5, 6, 7}  // left
+};
 
-// x -left/right+
-// y -front/back+
-// z -up/down+
+// ========== OLD COLOR DATA ==========
+
+SDL_FColor colorf[8];
+
+// ========== OLD MESH INSTANCES ==========
 
 Transform cube = {{0,0,0}, {0,0,0}, {1,1,1}};
+Transform floorCube = {{0,50,5}, {0,0,0}, {5,50,0.1}};
+Transform cube_wallL = {{-5,50,0}, {0,0,0}, {0.1,50,5}};
 
-// For cam take it as pos, rotation, normal
-CamState cam = {{0, -3, 0}, {0,1,0}, {0,0,1}};
+// ========== CAMERA TRANSFORM ==========
 
-int currentAxis = 0;
+CamState cam = {{0, -2, 0}, {0,0,0}, {0,1,0}, {0,0,1}};
+
+// ========== VECTOR FUNCTIONS ==========
 
 int clampi(int d, int min, int max) {
 	const int t = d < min ? min : d;
@@ -149,6 +201,18 @@ v3 normalize(const v3 v) {
 	return v3Scale(v, 1.0 / len);
 }
 
+v2 scalev2(const v2 a, const double s) {
+	v2 r;
+	r.x = a.x * s;
+	r.y = a.y * s;
+	return r;
+}
+v2 normalizev2(const v2 v) {
+	double len = sqrt( (v.x*v.x) + (v.y*v.y) );
+	if (len == 0.0) return v;
+	return scalev2(v, 1.0 / len);
+}
+
 v3 transformV3(const v3* v, const Transform* t) {
 	v3 ret = *v;
 
@@ -173,14 +237,6 @@ v3 transformV3(const v3* v, const Transform* t) {
 	ret.y = (x*(cy*sz)) + (y*((sx*sy*sz)+(cx*cz))) + (z*((cx*sy*sz)-(sx*cz)));
 	ret.z = (x*(-sy)) + (y*(sx*cy)) + (z*(cx*cy));
 
-	// ret.x = ((*v).x*(cos(r.y)*cos(r.z))) + ((*v).y*((sin(r.x)*cos(r.y)*cos(r.z))-(cos(r.x)*sin(r.z)))) + ((*v).z*((cos(r.x)*sin(r.y)*cos(r.z))+(sin(r.x)*sin(r.z))));
-	// ret.y = ((*v).x*(cos(r.y)*sin(r.z))) + ((*v).y*((sin(r.x)*sin(r.y)*cos(r.z))+(cos(r.x)*cos(r.z)))) + ((*v).z*((cos(r.x)*sin(r.y)*sin(r.z))-(sin(r.x)*cos(r.z))));
-	// ret.z = ((*v).x*(-sin(r.y))) + ((*v).y*(sin(r.x)*sin(r.y))) + ((*v).z*(cos(r.x)*cos(r.y)));
-
-	// ret.x = (ret.x*(cos(r.x)*cos(r.y))) + (ret.y*((cos(r.x)*sin(r.y)*sin(r.z))-(sin(r.x)*cos(r.z)))) + (ret.z*((cos(r.x)*sin(r.y)*cos(r.z))+(sin(r.x)*sin(r.z))));
-	// ret.y = (ret.x*(cos(r.x)*cos(r.y))) + (ret.y*((sin(r.x)*sin(r.y)*sin(r.z))+(cos(r.x)*cos(r.z)))) + (ret.z*((sin(r.x)*sin(r.y)*cos(r.z))-(cos(r.x)*sin(r.z))));
-	// ret.z = (ret.x*(-sin(r.y))) + (ret.y*(cos(r.y)*sin(r.z))) + (ret.z*(cos(r.y)*sin(r.z)));
-
 	// Transform position
 	ret.x += t->position.x;
 	ret.y += t->position.y;
@@ -200,27 +256,38 @@ v3* getCubePoints(const Transform* t) {
 	return points;
 }
 
+// ========== SETUP CAM PROJECTION VARS FOR EACH FRAME ==========
+
 CamProjectionInfo getCamProjectionInfo(const CamState* camera) {
 	CamProjectionInfo ret;
 
 	ret.position = camera->position;
-	ret.normalV = normalize(camera->normal);
-	ret.upV = normalize(camera->up);
+
+	Transform camTransform = {
+		{0,0,0},
+		camera->rotation,
+		{1,1,1}
+	};
+
+	ret.normalV = normalize(transformV3(&camera->defNormal,&camTransform));
+	ret.upV = normalize(transformV3(&camera->defUp,&camTransform));
 
 	// Projection plane
-	const v3 scaledNormal = v3Scale(camera->normal, CAM_CLIP_MIN);
+	const v3 scaledNormal = v3Scale(ret.normalV, CAM_CLIP_MIN);
 	const v3 planePoint = v3Add(camera->position, scaledNormal);
 
 	ret.planePosition = planePoint;
 
 	// Right vector
-	ret.rightV = normalize(crossProduct(camera->up, camera->normal));
+	ret.rightV = normalize(crossProduct(ret.upV, ret.normalV));
 
 	// fov scale
 	ret.fov_scale = SDL_WINDOW_WIDTH / (2 * tan(CAM_FOV / 2));
 
 	return ret;
 }
+
+// ========== PROJECT A POINT IN 3D SPACE TO A 2D POSITION ON SCREEN ==========
 
 int project3DtoScreen(const v3 point, const CamProjectionInfo* camState, v2* outV) {
 	// Ray
@@ -255,6 +322,8 @@ int project3DtoScreen(const v3 point, const CamProjectionInfo* camState, v2* out
 	return 1;
 }
 
+// ========== Projects an array of points to the screen ==========
+
 // Leaks memory, make sure to delete later :D
 v2* projectPoints3DtoScreen(const v3* v, const int n, const CamState* camState) {
 	v2* points = malloc(sizeof(struct v2) * n);
@@ -276,78 +345,7 @@ v2* projectPoints3DtoScreen(const v3* v, const int n, const CamState* camState) 
 	return points;
 }
 
-void quitGame() {
-	printf("Quitting...\n");
-	gameRunning = false;
-}
-
-void manageKeyDownEvent(const SDL_KeyboardEvent *e) {
-	switch (e->key) {
-		case SDLK_Q:
-			quitGame();
-			break;
-		case SDLK_SPACE:
-			if (spaceDown) break;
-			spinToggle = !spinToggle;
-			spaceDown=true;
-			break;
-		case SDLK_X:
-			if (xDown) break;
-			xDown=true;
-			break;
-		case SDLK_Y:
-			if (yDown) break;
-			yDown=true;
-			break;
-		case SDLK_Z:
-			if (zDown) break;
-			zDown=true;
-			break;
-		case SDLK_S:
-			if (sDown) break;
-			sDown=true;
-			break;
-		case SDLK_D:
-			if (dDown) break;
-			dDown=true;
-			break;
-		default:
-			//printf("KeyDown\n");
-			break;
-	}
-}
-
-void manageKeyUpEvent(const SDL_KeyboardEvent *e) {
-	switch (e->key) {
-		case SDLK_SPACE:
-			if (!spaceDown) break;
-			spaceDown=false;
-			break;
-		case SDLK_X:
-			if (!xDown) break;
-			xDown=false;
-			break;
-		case SDLK_Y:
-			if (!yDown) break;
-			yDown=false;
-			break;
-		case SDLK_Z:
-			if (!zDown) break;
-			zDown=false;
-			break;
-		case SDLK_S:
-			if (!sDown) break;
-			sDown=false;
-			break;
-		case SDLK_D:
-			if (!dDown) break;
-			dDown=false;
-			break;
-		default:
-			//printf("KeyUp\n");
-			break;
-	}
-}
+// ===== UPDATE LOOP =====
 
 void update(double delta) {
 	if (spinToggle) {
@@ -366,140 +364,265 @@ void update(double delta) {
 		cube.rotation.z += PI * 0.4 * delta;
 	}
 
+	// x,y plane
+	v2 moveDir = {0,0};
+
+	if (wDown) {
+		moveDir.y += 1;
+	}
 	if (sDown) {
+		moveDir.y -= 1;
+	}
+	if (aDown) {
+		moveDir.x += 1;
+	}
+	if (dDown) {
+		moveDir.x -= 1;
+	}
+
+	moveDir = normalizev2(moveDir);
+
+	double ct = cos(cam.rotation.z);
+	double st = sin(cam.rotation.z);
+
+	moveDir = (v2){
+		moveDir.x*ct - moveDir.y*st,
+		moveDir.x*st + moveDir.y*ct
+	};
+
+	cam.position.x += moveDir.x * 2 * delta;
+	cam.position.y += moveDir.y * 2 * delta;
+
+	// Up down
+	if (qDown) {
+		cam.position.z -= 2 * delta;
+	}
+	if (eDown) {
+		cam.position.z += 2 * delta;
+	}
+
+	if (jDown) {
 		cube.scale.x += 0.1 * delta;
 		cube.scale.y += 0.1 * delta;
 		cube.scale.z += 0.1 * delta;
 	}
-	if (dDown) {
+	if (kDown) {
 		cube.scale.x -= 0.1 * delta;
 		cube.scale.y -= 0.1 * delta;
 		cube.scale.z -= 0.1 * delta;
 	}
 }
 
-
-// 6 faces, each with 4 vertices
-const int CUBE_FACES[6][4] = {
-	{2, 3, 6, 7}, // front
-	{0, 1, 4, 5}, // back
-	{1, 3, 5, 7}, // top
-	{0, 2, 4, 6}, // bottom
-	{0, 1, 2, 3}, // right
-	{4, 5, 6, 7}  // left
-};
-
-SDL_FColor colorf[8];
-
-
+// ===== RENDER FRAME =====
 
 void render(SDL_Renderer* renderer) {
 	// Clear screen
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 	SDL_RenderClear(renderer);
 
-	// Render Points
-	v3* points = getCubePoints(&cube);
-	v2* projectedPoints = projectPoints3DtoScreen(points, CUBE_POINTS, &cam);
+	const int N = 2;
 
+	// Mesh array
+	Transform* meshes[2] = {
+		&floorCube,
+		//&cube_wallL,
+		&cube
+	};
 
-	v2* newPoints = malloc(sizeof(struct v2) * 8);
+	// for each mesh
+	for (int i=0; i<N; ++i) {
+		v3* points = getCubePoints(meshes[i]);
+		v2* projectedPoints = projectPoints3DtoScreen(points, CUBE_POINTS, &cam);
 
-	// for (int i=0; i<8; ++i) {
-	// 	newPoints[i].x = (1- points[i].x) * 60  + (SDL_WINDOW_WIDTH / 2);
-	// 	newPoints[i].y = (1- points[i].y) * 60  + (SDL_WINDOW_HEIGHT / 2);
-	// }
+		double centerDist = v3Len(v3Sub(meshes[i]->position, cam.position));
 
-	for (int i=0; i<8; ++i) {
-		newPoints[i] = projectedPoints[i];
+		// Render faces
+		for (int f = 0; f < 6; f++) {
+			SDL_Vertex verts[6];
+
+			int i0 = CUBE_FACES[f][0];
+			int i1 = CUBE_FACES[f][1];
+			int i2 = CUBE_FACES[f][2];
+			int i3 = CUBE_FACES[f][3];
+
+			// Find center of face (halfway between corners) length of average distance to corners from cam
+			double faceDist = v3Len(v3Scale(v3Add(
+				v3Sub(points[i1], cam.position),
+				v3Sub(points[i2], cam.position)
+				), 0.5));
+
+			if (faceDist > centerDist) continue;
+
+			// Triangle 1 (0,1,2)
+			verts[0] = (SDL_Vertex){ {projectedPoints[i0].x, projectedPoints[i0].y}, colorf[f], {0,0} };
+			verts[1] = (SDL_Vertex){ {projectedPoints[i1].x, projectedPoints[i1].y}, colorf[f], {0,0} };
+			verts[2] = (SDL_Vertex){ {projectedPoints[i2].x, projectedPoints[i2].y}, colorf[f], {0,0} };
+
+			// Triangle 2 (2,1,3)
+			verts[3] = (SDL_Vertex){ {projectedPoints[i2].x, projectedPoints[i2].y}, colorf[f], {0,0} };
+			verts[4] = (SDL_Vertex){ {projectedPoints[i1].x, projectedPoints[i1].y}, colorf[f], {0,0} };
+			verts[5] = (SDL_Vertex){ {projectedPoints[i3].x, projectedPoints[i3].y}, colorf[f], {0,0} };
+
+			SDL_RenderGeometry(renderer, NULL, verts, 6, NULL, 0);
+		}
+
+		free(points);
+		free(projectedPoints);
 	}
 
-
-
-
-	// ---- Render filled faces ----
-	for (int f = 0; f < 6; f++) {
-
-		// Random color per face (per frame)
-		v3 color = {
-			rand() % 256,
-			rand() % 256,
-			rand() % 256,
-		};
-
-
-
-
-		SDL_Vertex verts[6];
-
-		int i0 = CUBE_FACES[f][0];
-		int i1 = CUBE_FACES[f][1];
-		int i2 = CUBE_FACES[f][2];
-		int i3 = CUBE_FACES[f][3];
-
-		// Triangle 1 (0,1,2)
-		verts[0] = (SDL_Vertex){ {newPoints[i0].x, newPoints[i0].y}, colorf[f], {0,0} };
-		verts[1] = (SDL_Vertex){ {newPoints[i1].x, newPoints[i1].y}, colorf[f], {0,0} };
-		verts[2] = (SDL_Vertex){ {newPoints[i2].x, newPoints[i2].y}, colorf[f], {0,0} };
-
-		// Triangle 2 (2,1,3)
-		verts[3] = (SDL_Vertex){ {newPoints[i2].x, newPoints[i2].y}, colorf[f], {0,0} };
-		verts[4] = (SDL_Vertex){ {newPoints[i1].x, newPoints[i1].y}, colorf[f], {0,0} };
-		verts[5] = (SDL_Vertex){ {newPoints[i3].x, newPoints[i3].y}, colorf[f], {0,0} };
-
-		SDL_RenderGeometry(renderer, NULL, verts, 6, NULL, 0);
-	}
-
-	SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-	for (int i=0; i < CUBE_EDGES; i++) {
-		double x1 = newPoints[CUBE_EDGE_INDEXS[i].x].x;
-		double y1 = newPoints[CUBE_EDGE_INDEXS[i].x].y;
-		double x2 = newPoints[CUBE_EDGE_INDEXS[i].y].x;
-		double y2 = newPoints[CUBE_EDGE_INDEXS[i].y].y;;
-
-		SDL_RenderLine(renderer,
-			x1, y1, x2, y2
-		);
-	}
-
-	free(points);
-
-	// Render edges
-	// SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
-	// for (int i=0; i < CUBE_EDGES; i++) {
-	// 	SDL_RenderLine(renderer,
-	// 		projectedPoints[CUBE_EDGE_INDEXS[i].x].x, projectedPoints[CUBE_EDGE_INDEXS[i].x].y,
-	// 		projectedPoints[CUBE_EDGE_INDEXS[i].y].x, projectedPoints[CUBE_EDGE_INDEXS[i].y].y
-	// 	);
-	// }
-
-	/*
-	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-	for (int i=0; i < CUBE_POINTS; i++) {
-		SDL_RenderPoint(renderer, projectedPoints[i].x, projectedPoints[i].y);
-	}
-	*/
-
-	/*
-	// Render edges
-	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-	for (int i=0; i < CUBE_EDGES; i++) {
-		SDL_RenderLine(renderer,
-			points[CUBE_EDGE_INDEXS[i].x].x, points[CUBE_EDGE_INDEXS[i].x].z,
-			points[CUBE_EDGE_INDEXS[i].y].x, points[CUBE_EDGE_INDEXS[i].y].z
-		);
-	}
-
-	SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-	for (int i=0; i < CUBE_POINTS; i++) {
-		SDL_RenderPoint(renderer, points[i].x, points[i].z);
-	}
-	*/
-
-	//free(points);
-	free(projectedPoints);
 	SDL_RenderPresent(renderer);
 }
+
+
+// HANDLE INPUTS
+
+void quitGame() {
+	printf("Quitting...\n");
+	gameRunning = false;
+}
+
+void manageKeyDownEvent(const SDL_KeyboardEvent *e) {
+	switch (e->key) {
+		case SDLK_ESCAPE:
+			quitGame();
+			break;
+
+		case SDLK_SPACE:
+			if (spaceDown) break;
+			spinToggle = !spinToggle;
+			spaceDown=true;
+			break;
+
+		case SDLK_X:
+			if (xDown) break;
+			xDown=true;
+			break;
+		case SDLK_Y:
+			if (yDown) break;
+			yDown=true;
+			break;
+		case SDLK_Z:
+			if (zDown) break;
+			zDown=true;
+			break;
+
+		case SDLK_W:
+			if (wDown) break;
+			wDown=true;
+			break;
+		case SDLK_A:
+			if (aDown) break;
+			aDown=true;
+			break;
+		case SDLK_S:
+			if (sDown) break;
+			sDown=true;
+			break;
+		case SDLK_D:
+			if (dDown) break;
+			dDown=true;
+			break;
+
+		case SDLK_E:
+			if (eDown) break;
+			eDown=true;
+			break;
+		case SDLK_Q:
+			if (qDown) break;
+			qDown=true;
+			break;
+
+		case SDLK_J:
+			if (jDown) break;
+			jDown=true;
+			break;
+		case SDLK_K:
+			if (kDown) break;
+			kDown=true;
+			break;
+		default:
+			//printf("KeyDown\n");
+			break;
+	}
+}
+
+void manageKeyUpEvent(const SDL_KeyboardEvent *e) {
+	switch (e->key) {
+		case SDLK_SPACE:
+			if (!spaceDown) break;
+			spaceDown=false;
+			break;
+
+		case SDLK_X:
+			if (!xDown) break;
+			xDown=false;
+			break;
+		case SDLK_Y:
+			if (!yDown) break;
+			yDown=false;
+			break;
+		case SDLK_Z:
+			if (!zDown) break;
+			zDown=false;
+			break;
+
+		case SDLK_W:
+			if (!wDown) break;
+			wDown=false;
+			break;
+		case SDLK_A:
+			if (!aDown) break;
+			aDown=false;
+			break;
+		case SDLK_S:
+			if (!sDown) break;
+			sDown=false;
+			break;
+		case SDLK_D:
+			if (!dDown) break;
+			dDown=false;
+			break;
+
+		case SDLK_E:
+			if (!eDown) break;
+			eDown=false;
+			break;
+		case SDLK_Q:
+			if (!qDown) break;
+			qDown=false;
+			break;
+
+		case SDLK_J:
+			if (!jDown) break;
+			jDown=false;
+			break;
+		case SDLK_K:
+			if (!kDown) break;
+			kDown=false;
+			break;
+		default:
+			//printf("KeyUp\n");
+			break;
+	}
+}
+
+void manageMouseMotion(const SDL_MouseMotionEvent *e) {
+	double sense = 0.005;
+
+	double deltaX = e->xrel * sense;
+	double deltaY = e->yrel * sense;
+
+	cam.rotation.z += deltaX;
+	cam.rotation.x += deltaY;
+
+	if (cam.rotation.x > PI/2) {
+		cam.rotation.x = PI/2;
+	} else if (cam.rotation.x < -PI/2) {
+		cam.rotation.x = -PI/2;
+	}
+}
+
+
 
 int main(void) {
 	printf("Hello, World!\n");
@@ -517,6 +640,9 @@ int main(void) {
 	if (!renderer) {
 		SDL_Log("Failed to create renderer: %s", SDL_GetError());
 	}
+
+	//Lock mouse to screen center
+	SDL_SetWindowRelativeMouseMode(window->window, true);
 
 	Uint64 now = SDL_GetPerformanceCounter();
 	Uint64 last = 0;
@@ -553,7 +679,7 @@ int main(void) {
 			frames = 0;
 		}
 
-		// Event handeler
+		// Event handler
 		while (SDL_PollEvent(&e)) {
 			switch (e.type) {
 				case SDL_EVENT_QUIT:
@@ -565,13 +691,14 @@ int main(void) {
 				case SDL_EVENT_KEY_UP:
 					manageKeyUpEvent(&e.key);
 					break;
+				case SDL_EVENT_MOUSE_MOTION:
+					manageMouseMotion(&e.motion);
+					break;
 				default:
 					//printf("Event\n");
 					break;
 			}
 		}
-
-		//printf("%d", player_y_position);
 
 		update(deltaTime);
 		render(renderer);
